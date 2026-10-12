@@ -1,0 +1,14 @@
+__pycache__/
+*.egg-info/
+.venv/
+dist/
+build/
+*.gguf
+
+# local settings and everything cat3d writes
+cat3d.toml
+results.json
+logs/
+
+# uv recreates this on every run; with no dependencies it pins nothing
+uv.lock

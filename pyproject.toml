@@ -1,0 +1,17 @@
+[project]
+name = "cat3d"
+version = "0.1.0"
+description = "Rename 3D model files by what they look like, using Blender and a local vision model"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+cat3d = "cat3d:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["cat3d", "render", "llm", "naming"]
