@@ -61,7 +61,8 @@ your library, so it numbers them library-wide.
 
 - The name is the model's, as it writes it: the prompt in `llm.py` asks for a game-studio naming
   convention. cat3d only makes it safe as a file name (no spaces or symbols, no extension, no number of
-  the model's own) and numbers it across the whole library: `Fire_Hydrant_001.fbx`, `Fire_Hydrant_002.fbx`, …
+  the model's own) and drops filler that never belongs in a name (`3d`, `model`, `mesh`, `low poly`). It numbers names across the
+  whole library: `Fire_Hydrant_001.fbx`, `Fire_Hydrant_002.fbx`, …
 - A file only becomes `unknown_001.fbx` when the model gives no usable name at all ("object", "3d model").
 - Files Blender can't open keep their names, and `results.json` says why.
 - Running `rename` again on renamed files leaves them alone. Files are never overwritten.

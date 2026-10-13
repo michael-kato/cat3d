@@ -16,12 +16,12 @@ from urllib.parse import urlsplit
 
 QUESTION = (
     "The image shows a 3D model from four angles: front, side, top, and three-quarter.\n"
-    "Give it a short asset name in a professional game studio naming style: 1 to 3 generic English words "
-    "for what the main object is. If it is a character or figure, name the figure, not what it holds or wears.\n"
-    "Never use brand names, model numbers, proper names or words copied from text or labels; those belong "
-    "in the description, not the name. The hints below may be auto-generated or in another language: "
-    "trust the image over them. If unsure, give your best guess.\n"
-    "Reply with just the name: no other text, no sentence, no file extension."
+    "Give it a short asset name in a professional game studio naming style: 4 or fewer descriptive English words "
+    "Avoid using brand names, model numbers, proper nouns or words read from text in the image; those belong "
+    "in the description."
+    "Reply with just the name, no other text, do not include any file extensions. Words should be lower case and separated by underscores, and do not include any numbers or suffixes." \
+    "format should be noun_adjective_<optional_adjective>_<optional_adjective>"
+    "The hints below may be auto-generated or in another language. They pull from the 3D scene file directly to give clues in case the image is difficult to recognize: "
 )
 FOLLOW_UP = ("Now describe it in one sentence for a search index: what exactly it is, its style, color, era, or origin, "
              "and any brand, title or text you can read.")
@@ -45,7 +45,11 @@ def clean_names(names: list[str], keep: int = 8) -> list[str]:
     kept, seen = [], set()
     for name in names:
         name = FILE_SUFFIX.sub("", name)
-        name = re.sub(r"([._\-\s]*\d+|sg)+$", "", name, flags=re.I).strip(" ._-")
+        # One trailing number or 'SG' at a time: a single regex for the whole run backtracks
+        # exponentially on names like '118280388_302057217738075_7437610194166637494_n'.
+        while (stripped := re.sub(r"(?:[._\-\s]*\d+|sg)$", "", name, flags=re.I)) != name:
+            name = stripped
+        name = name.strip(" ._-")
         key = re.sub(r"[^a-z]", "", name.lower())
         words = [w for w in re.split(r"[^a-z]+", name.lower()) if w]
         if len(key) < 2 or key in JUNK or all(w in JUNK for w in words) or key in seen \

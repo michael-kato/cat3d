@@ -5,9 +5,25 @@ import unicodedata
 from itertools import count
 from pathlib import Path
 
+# Words the model adds that never belong in an asset's name (counted in 5,509 of its answers:
+# "3d" 118 times, "model" 95, "low poly" about 96, "mesh" 7, "asset" 4, "render" 1).
+NOT_NAMES = set("3d model mesh render lowpoly highpoly asset".split())
 # A name made only of these words says nothing about the object.
 FILLER = set("a an the of 3d model mesh render object low high poly lowpoly highpoly".split())
 GENERIC = set("unknown thing item shape part piece geometry abstract form".split())
+
+
+def drop_not_names(words: list[str]) -> list[str]:
+    """'low_poly_wolf_3d_model' -> wolf. "low poly" goes as a pair, so 'low_table' keeps its 'low'."""
+    kept, i = [], 0
+    while i < len(words):
+        if words[i].lower() in ("low", "high") and i + 1 < len(words) and words[i + 1].lower() == "poly":
+            i += 2
+            continue
+        if words[i].lower() not in NOT_NAMES:
+            kept.append(words[i])
+        i += 1
+    return kept
 
 
 def slugify(text: str, max_words: int = 6, max_chars: int = 48) -> str:
@@ -23,6 +39,7 @@ def slugify(text: str, max_words: int = 6, max_chars: int = 48) -> str:
     words = [w for w in re.split(r"[^A-Za-z0-9]+", text) if w and not re.fullmatch(r"[0-9a-f]{8,}", w.lower())]
     while words and words[-1].isdigit():
         words.pop()
+    words = drop_not_names(words)
     if not any(w.lower() not in GENERIC | FILLER and re.search("[a-z]", w.lower()) for w in words):
         return ""
     slug = ""
