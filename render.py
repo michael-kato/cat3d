@@ -97,14 +97,13 @@ def render_sheet(src: str, sheet: str, size: int, scratch: str) -> dict:
 
     # Names inside the file ("Chair_LOD0", "wood_albedo.png") are strong hints for the model.
     info = {
-        "stats": {"faces": sum(len(o.data.polygons) for o in objects)},
+        "stats": {"bones": sum(len(a.bones) for a in bpy.data.armatures)},
         "names": {
-            # Every object, not just meshes: empties and rigs often carry the telling names.
-            "objects": sorted({o.name for o in bpy.context.scene.objects})[:MAX_NAMES],
+            # Every object but cameras and lights: empties and rigs often carry the telling names.
+            "objects": sorted({o.name for o in bpy.context.scene.objects if o.type not in {"CAMERA", "LIGHT"}})[:MAX_NAMES],
             "materials": sorted({s.material.name for o in objects for s in o.material_slots if s.material})[:MAX_NAMES],
             "textures": sorted({os.path.basename(i.filepath) or i.name
                                 for i in bpy.data.images if i.source == "FILE"})[:MAX_NAMES],
-            "bones": sorted({b.name for a in bpy.data.armatures for b in a.bones})[:MAX_NAMES],
             "animations": sorted({a.name for a in bpy.data.actions})[:MAX_NAMES],
         },
     }

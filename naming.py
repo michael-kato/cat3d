@@ -5,28 +5,25 @@ import unicodedata
 from itertools import count
 from pathlib import Path
 
+# A name made only of these words says nothing about the object.
 FILLER = set("a an the of 3d model mesh render object low high poly lowpoly highpoly".split())
 GENERIC = set("unknown thing item shape part piece geometry abstract form".split())
 
 
-def noun_first(words: list[str]) -> list[str]:
-    """'red soda can' -> can soda red, so names sort by what the thing is, most specific word next.
+def slugify(text: str, max_words: int = 6, max_chars: int = 48) -> str:
+    """Make the model's name safe as a file name without restyling it: 'SM_Bottle_Glass_01' -> 'SM_Bottle_Glass'.
 
-    English puts the noun last, except before "of": 'bouquet of roses' -> bouquet roses.
+    Keeps its words, order and case. Drops characters files can't hold, an extension the model
+    added anyway, and its own trailing number, since cat3d numbers files itself.
+    Empty when nothing specific is left ('3D model', 'unknown', a bare number).
     """
-    if "of" in words:
-        i = words.index("of")
-        return words[i - 1::-1] + words[i + 1:] if i else words[1:]
-    return words[::-1]
-
-
-def slugify(text: str, max_words: int = 5, max_chars: int = 48) -> str:
-    """'A Red 3D Soda Can!' -> 'can_soda_red'. Empty when nothing specific is left."""
-    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
-    words = noun_first([w for w in re.split(r"[^a-z0-9]+", text) if w])
-    words = [w for w in words if w not in FILLER]
-    # Generic words or bare numbers (the model echoing "73781.obj") say nothing about the object.
-    if not any(w not in GENERIC and re.search("[a-z]", w) for w in words):
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().strip()
+    text = re.sub(r"\.[A-Za-z][A-Za-z0-9]{1,3}$", "", text)
+    # Hex ids the model copied from a file name ('c3de8f6d87bd') are not words.
+    words = [w for w in re.split(r"[^A-Za-z0-9]+", text) if w and not re.fullmatch(r"[0-9a-f]{8,}", w.lower())]
+    while words and words[-1].isdigit():
+        words.pop()
+    if not any(w.lower() not in GENERIC | FILLER and re.search("[a-z]", w.lower()) for w in words):
         return ""
     slug = ""
     for word in words[:max_words]:
@@ -49,7 +46,7 @@ def plan_names(slugs: dict[Path, str | None], taken: set[str]) -> dict[Path, Pat
     plan, pending = {}, []
     for src in sorted(slugs):
         label = slugs[src] or "unknown"
-        if re.fullmatch(re.escape(label) + r"_\d{3,}", src.stem) and src.stem.casefold() not in taken:
+        if re.fullmatch(re.escape(label) + r"_\d{3,}", src.stem, re.I) and src.stem.casefold() not in taken:
             plan[src] = src
             taken.add(src.stem.casefold())
         else:

@@ -1,6 +1,8 @@
 """Ask a local vision model, served by llama-server, what a contact sheet shows."""
 
 import base64
+import hashlib
+import inspect
 import json
 import math
 import os
@@ -14,16 +16,26 @@ from urllib.parse import urlsplit
 
 QUESTION = (
     "The image shows a 3D model from four angles: front, side, top, and three-quarter.\n"
-    "Name this object with a professional game studio style naming convention. If unsure, give your best guess."
+    "Give it a short asset name in a professional game studio naming style: 1 to 3 generic English words "
+    "for what the main object is. If it is a character or figure, name the figure, not what it holds or wears.\n"
+    "Never use brand names, model numbers, proper names or words copied from text or labels; those belong "
+    "in the description, not the name. The hints below may be auto-generated or in another language: "
+    "trust the image over them. If unsure, give your best guess.\n"
+    "Reply with just the name: no other text, no sentence, no file extension."
 )
 FOLLOW_UP = ("Now describe it in one sentence for a search index: what exactly it is, its style, color, era, or origin, "
              "and any brand, title or text you can read.")
 
 
-# Names exporters and tools generate on their own; they say nothing about the object.
-JUNK = set("object mesh node root rootnode scene gltfscenerootnode sketchfabmodel sketchfabscene default "
-           "defaultmaterial material mat lambert blinn phong aistandardsurface standardsurface principledbsdf "
-           "cube plane sphere cylinder empty armature camera light geometry group polysurface image texture".split())
+# Names that exporters and tools generate on their own, after stripping numbers and suffixes.
+# Every word here was seen in at least one of 313 sample files (295 Sketchfab GLBs, 18 mixed formats).
+JUNK = set("sketchfabmodel image object rootnode material root gltfscenerootnode lambert cube sceneroot "
+           "colladavisualscenegroup defaultmaterial cylinder pcylinder plane icosphere sphere mesh "
+           "pcylinderlambert group default model blinn initialshadinggroup wire camera mat polysurface "
+           "pcube phong take box node aistandardsurface gltfcreated gltfcreatedrootjoint pcubelambert "
+           "defaultmat modelmaterial matrl armature empty scene standardsurface "
+           # Also seen: Spanish and Italian Blender defaults, SketchUp, USD and OBJ export names.
+           "cubo cilindro materiale cerchiobezier edgecolor color edge geom usdroot obj".split())
 FILE_SUFFIX = re.compile(r"\.(obj|fbx|stl|ply|glb|gltf|blend|dae|3ds|max|ma|mb|c4d|png|jpe?g|tiff?|tga|bmp|exr|dds|webp)\b.*$", re.I)
 
 
@@ -35,20 +47,35 @@ def clean_names(names: list[str], keep: int = 8) -> list[str]:
         name = FILE_SUFFIX.sub("", name)
         name = re.sub(r"([._\-\s]*\d+|sg)+$", "", name, flags=re.I).strip(" ._-")
         key = re.sub(r"[^a-z]", "", name.lower())
-        if len(key) < 2 or key in JUNK or key in seen or "\ufffd" in name or re.fullmatch(r"[0-9a-f]{16,}", name.lower()):
+        words = [w for w in re.split(r"[^a-z]+", name.lower()) if w]
+        if len(key) < 2 or key in JUNK or all(w in JUNK for w in words) or key in seen \
+                or "\ufffd" in name or re.fullmatch(r"[0-9a-f]{16,}", name.lower()):
             continue
         seen.add(key)
         kept.append(name)
     return kept[:keep]
 
 
+def looks_like_id(text: str) -> bool:
+    """'c3de8f6d87bd4cd19ccd1f6ead3d4d2b' or '73781': a database id, not a name."""
+    return re.fullmatch(r"[0-9a-f]{8,}|\d+", text.lower()) is not None
+
+
 def build_prompt(file_name: str, stats: dict, names: dict) -> str:
-    hints = [f'original file name: "{file_name}"']
+    hints = [] if looks_like_id(Path(file_name).stem) else [f'original file name: "{file_name}"']
     for kind, found in names.items():
         if cleaned := clean_names(found):
             hints.append(f"{kind[:-1]} names: " + ", ".join(cleaned))
-    hints.append(f"face count: {stats['faces']}")
+    if stats["bones"]:
+        hints.append(f"rigged with {stats['bones']} bones")
+    if not hints:
+        return QUESTION
     return QUESTION + "\nHints from inside the file (they may be meaningless):\n- " + "\n- ".join(hints)
+
+
+# Changes whenever the questions or the hints do, so answers to an older prompt are asked again.
+PROMPT_ID = hashlib.sha1("".join([QUESTION, FOLLOW_UP, " ".join(sorted(JUNK)), inspect.getsource(clean_names),
+                                  inspect.getsource(looks_like_id), inspect.getsource(build_prompt)]).encode()).hexdigest()[:8]
 
 
 def _chat(server_url: str, messages: list[dict], max_tokens: int) -> dict:

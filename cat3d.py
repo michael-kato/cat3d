@@ -26,7 +26,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from llm import ask, build_prompt, running_server
+from llm import PROMPT_ID, ask, build_prompt, running_server
 from naming import plan_names, slugify
 from render import render_chunk
 
@@ -100,7 +100,7 @@ def free_image_name(folder: Path, stem: str) -> Path:
 def classify(records: dict[Path, dict], results: dict[str, dict], settings) -> None:
     """Fill in each record's guess, description and confidence. Files answered by an earlier run are skipped."""
     model_id = Path(settings.model).name if settings.model else settings.hf_repo
-    todo = [f for f, r in records.items() if not (r.get("model") == model_id and "guess" in r)]
+    todo = [f for f, r in records.items() if not (r.get("model") == model_id and r.get("prompt_id") == PROMPT_ID and "guess" in r)]
     print(f"{len(records)} files: {len(records) - len(todo)} answered by an earlier run, {len(todo)} to do")
     if not todo:
         return
@@ -114,11 +114,12 @@ def classify(records: dict[Path, dict], results: dict[str, dict], settings) -> N
             jobs = [{"src": str(f), "sheet": os.path.join(tmp, f"{i}.png")} for i, f in enumerate(chunk)]
             for result in render_chunk(settings.blender, jobs, settings.sheet_size, settings.file_timeout):
                 f = Path(result["src"])
-                answer, started = {"model": model_id, "error": None}, time.perf_counter()
+                answer, started = {"model": model_id, "prompt_id": PROMPT_ID, "error": None}, time.perf_counter()
                 try:
                     if not result["ok"]:
                         raise RuntimeError(f"render: {result['error']}")
-                    prompt = build_prompt(f.name, result["stats"], result["names"])
+                    # The original name, not the current one: a name cat3d gave earlier must not steer it again.
+                    prompt = build_prompt(records[f]["original"], result["stats"], result["names"])
                     answer.update(ask(url, Path(result["sheet"]).read_bytes(), prompt))
                     image = free_image_name(RUN, f.stem)  # renamed to match the planned name later
                     shutil.move(result["sheet"], image)
@@ -231,10 +232,11 @@ def apply(only: list[str] | None = None) -> int:
     keys = [k for k, r in results.items() if "planned" in r and (only is None or k in only)]
     pairs = [(Path(results[k]["folder"], k), Path(results[k]["folder"], results[k]["planned"])) for k in keys]
     done, problems = rename_all(pairs, RUN / "renames.csv")
-    for src, dst in done:
-        record = results.pop(src.name)
+    # Take every renamed record out before re-adding any: a new name can be another file's old one.
+    moved = [(src, dst, results.pop(src.name)) for src, dst in done]
+    for src, dst, record in moved:
         record["history"].append({"run": RUN.name, "from": src.name, "to": dst.name})
-        del record["planned"]
+        record.pop("planned", None)
         results[dst.name] = record
     save_results(results)
     print(f"renamed {len(done)} files; to put them back: cat3d undo")
@@ -254,8 +256,8 @@ def undo() -> int:
     keys = [k for k, r in results.items() if r["history"] and r["history"][-1]["run"] == last]
     pairs = [(Path(results[k]["folder"], k), Path(results[k]["folder"], results[k]["history"][-1]["from"])) for k in keys]
     done, problems = rename_all(pairs, RUN / "renames.csv")
-    for src, dst in done:
-        record = results.pop(src.name)
+    moved = [(dst, results.pop(src.name)) for src, dst in done]  # all out first, as in apply()
+    for dst, record in moved:
         record["history"].pop()
         results[dst.name] = record
     save_results(results)

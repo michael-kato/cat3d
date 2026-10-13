@@ -4,7 +4,7 @@ Rename 3D model files by what they look like.
 
 cat3d opens each file in Blender, renders it from four angles into one image, asks a
 local vision model (Qwen3.5-2B via llama.cpp) what the object is, and renames the
-file to the answer: `mesh_0042.fbx` becomes `mirror_hand_001.fbx`. Nothing leaves your machine.
+file to the answer: `mesh_0042.fbx` becomes `Hand_Mirror_001.fbx`. Nothing leaves your machine.
 
 Formats: `.obj` `.fbx` `.glb` `.gltf` `.stl` `.ply`
 
@@ -59,9 +59,9 @@ your library, so it numbers them library-wide.
 
 ## Naming
 
-- Noun first, then the most to least specific words, so similar things sort together:
-  "red soda can" becomes `can_soda_red_001.fbx`, next to `can_paint_001.fbx`.
-- Lowercase words joined by underscores and numbered across the whole library: `ring_001.fbx`, `ring_002.fbx`, …
+- The name is the model's, as it writes it: the prompt in `llm.py` asks for a game-studio naming
+  convention. cat3d only makes it safe as a file name (no spaces or symbols, no extension, no number of
+  the model's own) and numbers it across the whole library: `Fire_Hydrant_001.fbx`, `Fire_Hydrant_002.fbx`, …
 - A file only becomes `unknown_001.fbx` when the model gives no usable name at all ("object", "3d model").
 - Files Blender can't open keep their names, and `results.json` says why.
 - Running `rename` again on renamed files leaves them alone. Files are never overwritten.
