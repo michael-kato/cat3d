@@ -13,42 +13,128 @@ FILLER = set("a an the of 3d model mesh render object low high poly lowpoly high
 GENERIC = set("unknown thing item shape part piece geometry abstract form".split())
 
 
+# Colours are metadata, not part of names. Every colour word seen in the model's answers and descriptions,
+# except metal colours (gold, golden, silver, copper, bronze): those describe the material, so they stay.
+COLORS = set("red black blue brown green gray grey white yellow purple orange pink teal beige "
+             "cream maroon tan navy cyan magenta turquoise colorful".split())
+# Shades count as colour only next to one: "light blue vase" -> vase, but "light fixture" keeps "light".
+SHADES = set("light pale bright deep".split())
+# Always a tone, never an identity in the model's answers ("dark wood cabinet", "dark glass bottle"), so it
+# leaves names everywhere. Not a colour either, so it never becomes a variant's colour.
+TONES = {"dark"}
+
+# Words that start the extra-detail part of a phrase; the noun comes right before them.
+DETAIL_STARTS = set("of with in on for from at by".split())
+# Actions that also start a detail ("cow standing on a platform"). Only the ones seen in the model's
+# answers: most words ending in -ing there are nouns ("ring" 17 times, "building", "casing").
+ACTIONS = set("standing hanging".split())
+
+
 def drop_not_names(words: list[str]) -> list[str]:
-    """'low_poly_wolf_3d_model' -> wolf. "low poly" goes as a pair, so 'low_table' keeps its 'low'."""
+    """low poly wolf 3d model -> wolf. "low poly" goes as a pair, so 'low table' keeps its 'low'."""
     kept, i = [], 0
     while i < len(words):
-        if words[i].lower() in ("low", "high") and i + 1 < len(words) and words[i + 1].lower() == "poly":
+        if words[i] in ("low", "high") and i + 1 < len(words) and words[i + 1] == "poly":
             i += 2
             continue
-        if words[i].lower() not in NOT_NAMES:
+        if words[i] not in NOT_NAMES:
             kept.append(words[i])
         i += 1
     return kept
 
 
-def slugify(text: str, max_words: int = 6, max_chars: int = 48) -> str:
-    """Make the model's name safe as a file name without restyling it: 'SM_Bottle_Glass_01' -> 'SM_Bottle_Glass'.
+def join_kept(words: list[str], phrases: list[str]) -> list[str]:
+    """Make each keep-together phrase one word, so noun_first can't split it: brown teddy bear -> brown teddy_bear.
 
-    Keeps its words, order and case. Drops characters files can't hold, an extension the model
-    added anyway, and its own trailing number, since cat3d numbers files itself.
-    Empty when nothing specific is left ('3D model', 'unknown', a bare number).
+    Spacing, hyphens and a plural 's' don't matter: "flip-flops" matches "flip flop".
     """
-    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().strip()
-    text = re.sub(r"\.[A-Za-z][A-Za-z0-9]{1,3}$", "", text)
+    def key(w: str) -> str:
+        return w[:-1] if len(w) > 3 and w.endswith("s") else w
+    targets = sorted(([key(w) for w in re.split(r"[^a-z0-9]+", p.lower()) if w] for p in phrases), key=len, reverse=True)
+    joined, i = [], 0
+    while i < len(words):
+        match = next((t for t in targets if [key(w) for w in words[i:i + len(t)]] == t), None)
+        joined.append("_".join(words[i:i + len(match)]) if match else words[i])
+        i += len(match) if match else 1
+    return joined
+
+
+def noun_first(words: list[str]) -> list[str]:
+    """red bell pepper -> pepper bell red: the noun, then the closest (most specific) words first.
+
+    English puts the noun last, except before a detail like "with red patterns" or "standing on a
+    platform": black robe with red patterns -> robe black patterns red. Tested against NLTK's tagger
+    on 4,373 of the model's answers: this rule picked the right noun in nearly every disagreement.
+    """
+    words = [w for w in words if w not in ("a", "an", "the", "and")]
+    for i, word in enumerate(words):
+        if i and (word in DETAIL_STARTS or word in ACTIONS):
+            detail = words[i + 1:]
+            while detail and detail[0] in DETAIL_STARTS:  # "standing on ..." -> "..."
+                detail = detail[1:]
+            return words[:i][::-1] + noun_first(detail)  # the detail is a phrase of its own
+    return words[::-1]
+
+
+def colour_words(words: list[str]) -> set[str]:
+    """The colours and tones in a phrase, plus any shade standing next to a colour."""
+    found = set()
+    for i, word in enumerate(words):
+        neighbours = {words[j] for j in (i - 1, i + 1) if 0 <= j < len(words)}
+        if word in COLORS or word in TONES or (word in SHADES and neighbours & COLORS):
+            found.add(word)
+    return found
+
+
+def unique_words(tokens: list[str]) -> list[str]:
+    """No word twice, even inside kept phrases: table table_tennis -> table tennis."""
+    used, kept = set(), []
+    for token in tokens:
+        parts = [p for p in token.split("_") if p not in used]
+        used.update(parts)
+        if parts:
+            kept.append("_".join(parts))
+    return kept
+
+
+def split_name(text: str, keep_together: list[str] = (), max_words: int = 4, max_chars: int = 48) -> tuple[str, list[str]]:
+    """The model's plain-English answer as (file name, colours):
+    'red and black flip-flops' -> ('flip_flops', ['red', 'black']).
+
+    Lowercase, noun first, no filler ('3d', 'model', 'low poly'), no word twice, at most `max_words`
+    words. Phrases in `keep_together` stay whole: 'brown teddy bear' -> 'teddy_bear'. Colours go to the
+    second value instead of the name, unless the colour is the noun itself ('an orange'). Drops an
+    extension or trailing number the model added, since cat3d numbers files itself. The name is empty
+    when nothing specific is left ('3D model', 'unknown', a bare number).
+    """
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().strip().lower()
+    text = re.sub(r"\.[a-z][a-z0-9]{1,3}$", "", text)
     # Hex ids the model copied from a file name ('c3de8f6d87bd') are not words.
-    words = [w for w in re.split(r"[^A-Za-z0-9]+", text) if w and not re.fullmatch(r"[0-9a-f]{8,}", w.lower())]
+    words = [w for w in re.split(r"[^a-z0-9]+", text) if w and not re.fullmatch(r"[0-9a-f]{8,}", w)]
     while words and words[-1].isdigit():
         words.pop()
-    words = drop_not_names(words)
-    if not any(w.lower() not in GENERIC | FILLER and re.search("[a-z]", w.lower()) for w in words):
-        return ""
+    tokens = join_kept(drop_not_names(words), keep_together)
+    colours = colour_words(tokens)
+    ordered = unique_words(noun_first(tokens))
+    if not ordered:
+        return "", []
+    head = ordered[0]
+    name = [head] + [w for w in ordered[1:] if w not in colours]
+    found = list(dict.fromkeys(w for w in tokens if w in colours and w in COLORS and w != head))
+    if not any(w not in GENERIC | FILLER and re.search("[a-z]", w) for w in name):
+        return "", found
     slug = ""
-    for word in words[:max_words]:
+    for word in name[:max_words]:
         candidate = f"{slug}_{word}" if slug else word
         if len(candidate) > max_chars:
             break
         slug = candidate
-    return slug
+    return slug, found
+
+
+def colours_in(text: str) -> list[str]:
+    """Colour words in free text, in order: for descriptions."""
+    return list(dict.fromkeys(w for w in re.split(r"[^a-z]+", text.lower()) if w in COLORS))
 
 
 def plan_names(slugs: dict[Path, str | None], taken: set[str]) -> dict[Path, Path]:

@@ -22,12 +22,12 @@ import threading
 import time
 import tomllib
 import uuid
-from collections import Counter
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from llm import PROMPT_ID, ask, build_prompt, running_server
-from naming import plan_names, slugify
+from naming import colours_in, plan_names, split_name
 from render import render_chunk
 
 EXTENSIONS = {".obj", ".fbx", ".glb", ".gltf", ".stl", ".ply"}
@@ -48,6 +48,7 @@ DEFAULTS = {
     "chunk_size": 25,  # files per Blender process
     "file_timeout": 120.0,  # seconds per file before Blender is killed
     "parallel": 4,  # llama-server slots
+    "keep_together": [],  # phrases that stay whole in names ("teddy bear"); set in cat3d.toml only
 }
 
 
@@ -124,6 +125,7 @@ def classify(records: dict[Path, dict], results: dict[str, dict], settings) -> N
                     image = free_image_name(RUN, f.stem)  # renamed to match the planned name later
                     shutil.move(result["sheet"], image)
                     answer["image"] = str(image.relative_to(HOME))
+                    answer["geometry"] = result["stats"]["geometry"]  # tells colour variants of one mesh apart
                 except Exception as e:  # one failure leaves one file untouched; the next run retries it
                     answer["error"] = str(e)
                 # Time to open, render and name this one file (Blender measures its part).
@@ -163,6 +165,20 @@ def label_images(records: dict[Path, dict]) -> None:
         record["image"] = str(image.relative_to(HOME))
 
 
+def add_variant_colours(records: dict[Path, dict], slugs: dict[Path, str | None]) -> None:
+    """Colours stay out of names, except to tell apart files that would share a name and have identical
+    geometry but different colours: chair_wooden_red_001 and chair_wooden_blue_001."""
+    same = defaultdict(list)
+    for f, record in records.items():
+        if slugs[f] and record.get("geometry"):
+            same[slugs[f], record["geometry"]].append(f)
+    for files in same.values():
+        if len({records[f]["colors"][0] for f in files if records[f]["colors"]}) > 1:
+            for f in files:
+                if records[f]["colors"]:
+                    slugs[f] += "_" + records[f]["colors"][0]
+
+
 def plan(settings) -> list[str]:
     """Work out a new name for every file and record it in results.json as "planned". Renames nothing."""
     results = load_results()
@@ -172,7 +188,13 @@ def plan(settings) -> list[str]:
     taken = set(results) - {f.name for f in named}
     for folder in {f.parent for f in named}:
         taken |= set(os.listdir(folder)) - {f.name for f in named}
-    destinations = plan_names({f: slugify(r["guess"]) or None for f, r in named.items()}, taken)
+    slugs = {}
+    for f, record in named.items():
+        slugs[f], colours = split_name(record["guess"], settings.keep_together)
+        record["colors"] = list(dict.fromkeys(colours + colours_in(record.get("description", ""))))
+        slugs[f] = slugs[f] or None
+    add_variant_colours(named, slugs)
+    destinations = plan_names(slugs, taken)
     for f, record in named.items():
         if destinations[f] == f:
             record.pop("planned", None)
@@ -282,6 +304,8 @@ def load_settings() -> dict:
 def main(argv: list[str] | None = None) -> int:
     settings = argparse.ArgumentParser(add_help=False)
     for key, default in DEFAULTS.items():
+        if isinstance(default, list):
+            continue  # lists live in cat3d.toml, not on the command line
         settings.add_argument("--" + key.replace("_", "-"), dest=key, type=str if default is None else type(default))
     settings.set_defaults(**load_settings())
 

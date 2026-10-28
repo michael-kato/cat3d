@@ -97,7 +97,13 @@ def render_sheet(src: str, sheet: str, size: int, scratch: str) -> dict:
 
     # Names inside the file ("Chair_LOD0", "wood_albedo.png") are strong hints for the model.
     info = {
-        "stats": {"bones": sum(len(a.bones) for a in bpy.data.armatures)},
+        "stats": {
+            "bones": sum(len(a.bones) for a in bpy.data.armatures),
+            # Same counts and size means the same mesh: colour variants share this.
+            "geometry": "{}v_{}f_{}".format(sum(len(o.data.vertices) for o in objects),
+                                            sum(len(o.data.polygons) for o in objects),
+                                            "x".join(f"{v:.4f}" for v in extent)),
+        },
         "names": {
             # Every object but cameras and lights: empties and rigs often carry the telling names.
             "objects": sorted({o.name for o in bpy.context.scene.objects if o.type not in {"CAMERA", "LIGHT"}})[:MAX_NAMES],

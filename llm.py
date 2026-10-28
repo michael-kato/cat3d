@@ -16,15 +16,14 @@ from urllib.parse import urlsplit
 
 QUESTION = (
     "The image shows a 3D model from four angles: front, side, top, and three-quarter.\n"
-    "Give it a short asset name in a professional game studio naming style: 4 or fewer descriptive English words "
-    "Avoid using brand names, model numbers, proper nouns or words read from text in the image; those belong "
-    "in the description."
-    "Reply with just the name, no other text, do not include any file extensions. Words should be lower case and separated by underscores, and do not include any numbers or suffixes." \
-    "format should be noun_adjective_<optional_adjective>_<optional_adjective>"
-    "The hints below may be auto-generated or in another language. They pull from the 3D scene file directly to give clues in case the image is difficult to recognize: "
+    "What is this object? Reply with a short plain-English noun phrase of 4 words or fewer, the way you "
+    "would say it in a sentence. Name the object itself, not the picture: never mention views, angles or "
+    "that it is a 3D model. If it is a character or figure, name the figure, not what it holds or wears. "
+    "Avoid brand names, model numbers, proper nouns and words read from text in the image; those belong "
+    "in the description. If unsure, give your best guess. Reply with just the phrase."
 )
 FOLLOW_UP = ("Now describe it in one sentence for a search index: what exactly it is, its style, color, era, or origin, "
-             "and any brand, title or text you can read.")
+             "and any brand, title or text you can read.")  
 
 
 # Names that exporters and tools generate on their own, after stripping numbers and suffixes.
@@ -74,7 +73,8 @@ def build_prompt(file_name: str, stats: dict, names: dict) -> str:
         hints.append(f"rigged with {stats['bones']} bones")
     if not hints:
         return QUESTION
-    return QUESTION + "\nHints from inside the file (they may be meaningless):\n- " + "\n- ".join(hints)
+    return (QUESTION + "\nHints from the 3D file itself, for when the image is hard to recognize. They may be "
+            "auto-generated or in another language; trust the image over them:\n- " + "\n- ".join(hints))
 
 
 # Changes whenever the questions or the hints do, so answers to an older prompt are asked again.
